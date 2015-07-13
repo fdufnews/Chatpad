@@ -22,8 +22,21 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+ /*
+  * 28/06/2015 fdufnews
+  *     modified includes to support >1.0 Arduino IDE
+  *     added synchronization on the first byte of the status frame (0xA5) at end of init
+  *     as some time the frame was "out of phase" and library was unable to recover
+  * 	added recover from out of sync (unexpected packet and so on)
+  * 	added option to recover silently from out of sync (define in Chatpad.h)
+  */
 #include "Chatpad.h"
-#include "wiring.h"
+#if defined(ARDUINO) && ARDUINO >= 100
+  #include "Arduino.h"
+#else
+//#include "wiring.h"
+  #include "WProgram.h"
+#endif
 #include "HardwareSerial.h"
 
 #include <avr/pgmspace.h>
@@ -38,6 +51,27 @@ static const byte kPeopleMask = (1 << 3);
 static const byte kInitMessage[] = { 0x87, 0x02, 0x8C, 0x1F, 0xCC };
 static const byte kAwakeMessage[] = { 0x87, 0x02, 0x8C, 0x1B, 0xD0 };
 
+/* 28/06/2015 fdufnews
+   *  added synchronisation on A5 pattern
+   * wait for chatpad to answer then 
+   * synchronize on A5 to be sure buffer starts filling on a frame start
+   */
+void Chatpad::synchronize(void){
+  while (_serial->available()==0);
+  _serial->write(kAwakeMessage,sizeof(kAwakeMessage));
+  boolean inSync=0;
+  while(inSync==0){
+    if (_serial->available()){
+      if (_serial->peek()==0xA5){
+        inSync=1;
+      }else{
+        _serial->read();
+      }
+    }
+  }
+}
+
+
 void Chatpad::init(HardwareSerial &serial, Chatpad::callback_t callback) {
   _serial = &serial;
   _callback = callback;
@@ -47,6 +81,11 @@ void Chatpad::init(HardwareSerial &serial, Chatpad::callback_t callback) {
   _last_ping = 0;
   _serial->begin(19200);
   _serial->write(kInitMessage, sizeof(kInitMessage));
+/* 28/06/2015 fdufnews
+ * call synchronize to find header in data stream
+ */
+  synchronize();
+  
 }
 
 void Chatpad::poll() {
@@ -63,13 +102,31 @@ void Chatpad::poll() {
     // We *do not* expect other types of packets.  If we find one, complain
     // to the user.
     if (_buffer[0] != 0xB4) {
+	/* 28/07/2015 fdufnews
+	* option to have no message when communication fails
+	*/
+	  #if !defined(SILENTLY_RECOVER)
       Serial.print("Unexpected packet type: ");
       Serial.println(_buffer[0], HEX);
+      #endif
+	/* 28/06/2015 fdufnews
+	* call synchronize to find header in data stream
+	*/
+      synchronize();
       return;
     }
     if (_buffer[1] != 0xC5) {
+	/* 28/07/2015 fdufnews
+	* option to have no message when communication fails
+	*/
+	  #if !defined(SILENTLY_RECOVER)
       Serial.print("Unexpected second byte: ");
       Serial.println(_buffer[1], HEX);
+      #endif
+	/* 28/06/2015 fdufnews
+	* call synchronize to find header in data stream
+	*/
+      synchronize();
       return;
     }
 
@@ -78,7 +135,16 @@ void Chatpad::poll() {
     for (int i = 1; i < 7; i++) checksum += _buffer[i];
     checksum = -checksum;
     if (checksum != _buffer[7]) {
+	/* 28/07/2015 fdufnews
+	* option to have no message when communication fails
+	*/
+ 	  #if !defined(SILENTLY_RECOVER)
       Serial.println("Checksum failure");
+      #endif
+	/* 28/06/2015 fdufnews
+	* call synchronize to find header in data stream
+	*/
+      synchronize();
       return;
     }
 
@@ -154,6 +220,7 @@ void Chatpad::dispatch(uint8_t code, int is_down) {
 
 // These tables have been compacted and must be accessed using this formula:
 //  index = (((keycode & 0xF0) - 0x10) >> 1) | ((keycode & 0x0F) - 1)
+#ifdef keybUS
 static const char kAsciiTable[] PROGMEM = {
   '7', /* 11 Key7 */
   '6', /* 12 Key6 */
@@ -283,14 +350,357 @@ static const char kAsciiTable_Shifted[] PROGMEM = {
   'K', /* 77 KeyK */
   0, /* 78 Unused */
 };
+#endif // endif keybUS
 
+#ifdef keybFR
+static const char kAsciiTable[] PROGMEM = {
+  '7', /* 11 Key7 */
+  '6', /* 12 Key6 */
+  '5', /* 13 Key5 */
+  '4', /* 14 Key4 */
+  '3', /* 15 Key3 */
+  '2', /* 16 Key2 */
+  '1', /* 17 Key1 */
+  0, /* 18 Unused */
+
+  'u', /* 21 KeyU */
+  'y', /* 22 KeyY */
+  't', /* 23 KeyT */
+  'r', /* 24 KeyR */
+  'e', /* 25 KeyE */
+  'z', /* 26 KeyW */
+  'a', /* 27 KeyQ */
+  0, /* 28 Unused */
+
+  'j', /* 31 KeyJ */
+  'h', /* 32 KeyH */
+  'g', /* 33 KeyG */
+  'f', /* 34 KeyF */
+  'd', /* 35 KeyD */
+  's', /* 36 KeyS */
+  'q', /* 37 KeyA */
+  0, /* 38 Unused */
+
+  'n', /* 41 KeyN */
+  'b', /* 42 KeyB */
+  'v', /* 43 KeyV */
+  'c', /* 44 KeyC */
+  'x', /* 45 KeyX */
+  'w', /* 46 KeyZ */
+  0, /* 47 Unused */
+  0, /* 48 Unused */
+
+  0, /* 51 KeyRight */
+  ',', /* 52 KeyM */
+  '.', /* 53 KeyPeriod */
+  ' ', /* 54 KeySpace */
+  0, /* 55 KeyLeft */
+  0, /* 56 Unused */
+  0, /* 57 Unused */
+  0, /* 58 Unused */
+
+  0, /* 61 Unused */
+  'm', /* 62 KeyComma */
+  '\n', /* 63 KeyEnter */
+  'p', /* 64 KeyP */
+  '0', /* 65 Key0 */
+  '9', /* 66 Key9 */
+  '8', /* 67 Key8 */
+  0, /* 68 Unused */
+
+  '\b', /* 71 KeyBackspace */
+  'l', /* 72 KeyL */
+  0, /* 73 Unused */
+  0, /* 74 Unused */
+  'o', /* 75 KeyO */
+  'i', /* 76 KeyI */
+  'k', /* 77 KeyK */
+  0, /* 78 Unused */
+};
+
+static const char kAsciiTable_Shifted[] PROGMEM = {
+  '7', /* 11 Key7 */
+  '6', /* 12 Key6 */
+  '5', /* 13 Key5 */
+  '4', /* 14 Key4 */
+  '3', /* 15 Key3 */
+  '2', /* 16 Key2 */
+  '1', /* 17 Key1 */
+  0, /* 18 Unused */
+
+  'U', /* 21 KeyU */
+  'Y', /* 22 KeyY */
+  'T', /* 23 KeyT */
+  'R', /* 24 KeyR */
+  'E', /* 25 KeyE */
+  'Z', /* 26 KeyW */
+  'A', /* 27 KeyQ */
+  0, /* 28 Unused */
+
+  'J', /* 31 KeyJ */
+  'H', /* 32 KeyH */
+  'G', /* 33 KeyG */
+  'F', /* 34 KeyF */
+  'D', /* 35 KeyD */
+  'S', /* 36 KeyS */
+  'Q', /* 37 KeyA */
+  0, /* 38 Unused */
+
+  'N', /* 41 KeyN */
+  'B', /* 42 KeyB */
+  'V', /* 43 KeyV */
+  'C', /* 44 KeyC */
+  'X', /* 45 KeyX */
+  'W', /* 46 KeyZ */
+  0, /* 47 Unused */
+  0, /* 48 Unused */
+
+  0, /* 51 KeyRight */
+  ',', /* 52 KeyM */
+  '.', /* 53 KeyPeriod */
+  ' ', /* 54 KeySpace */
+  0, /* 55 KeyLeft */
+  0, /* 56 Unused */
+  0, /* 57 Unused */
+  0, /* 58 Unused */
+
+  0, /* 61 Unused */
+  'M', /* 62 KeyComma */
+  '\n', /* 63 KeyEnter */
+  'P', /* 64 KeyP */
+  '0', /* 65 Key0 */
+  '9', /* 66 Key9 */
+  '8', /* 67 Key8 */
+  0, /* 68 Unused */
+
+  '\b', /* 71 KeyBackspace */
+  'L', /* 72 KeyL */
+  0, /* 73 Unused */
+  0, /* 74 Unused */
+  'O', /* 75 KeyO */
+  'I', /* 76 KeyI */
+  'K', /* 77 KeyK */
+  0, /* 78 Unused */
+};
+
+static const char kAsciiTable_Green[] PROGMEM = {
+  '7', /* 11 Key7 */
+  '6', /* 12 Key6 */
+  '5', /* 13 Key5 */
+  '4', /* 14 Key4 */
+  '3', /* 15 Key3 */
+  '2', /* 16 Key2 */
+  '1', /* 17 Key1 */
+  0, /* 18 Unused */
+
+  0, /* 21 KeyU */
+  0, /* 22 KeyY */
+  '#', /* 23 KeyT */
+  0, /* 24 KeyR */
+  0, /* 25 KeyE */
+  0, /* 26 KeyW */
+  0, /* 27 KeyQ */
+  0, /* 28 Unused */
+
+  0, /* 31 KeyJ */
+  '|', /* 32 KeyH */
+  0, /* 33 KeyG */
+  0, /* 34 KeyF */
+  0, /* 35 KeyD */
+  0, /* 36 KeyS */
+  0, /* 37 KeyA */
+  0, /* 38 Unused */
+
+  '?', /* 41 KeyN */
+  '+', /* 42 KeyB */
+  '=', /* 43 KeyV */
+  0, /* 44 KeyC */
+  0, /* 45 KeyX */
+  0, /* 46 KeyZ */
+  0, /* 47 Unused */
+  0, /* 48 Unused */
+
+  0, /* 51 KeyRight */
+  '!', /* 52 KeyM */
+  ':', /* 53 KeyPeriod */
+  ' ', /* 54 KeySpace */
+  0, /* 55 KeyLeft */
+  0, /* 56 Unused */
+  0, /* 57 Unused */
+  0, /* 58 Unused */
+
+  0, /* 61 Unused */
+  '*', /* 62 KeyComma */
+  '\n', /* 63 KeyEnter */
+  0, /* 64 KeyP */
+  '0', /* 65 Key0 */
+  '9', /* 66 Key9 */
+  '8', /* 67 Key8 */
+  0, /* 68 Unused */
+
+  '\b', /* 71 KeyBackspace */
+  '$', /* 72 KeyL */
+  0, /* 73 Unused */
+  0, /* 74 Unused */
+  0, /* 75 KeyO */
+  0, /* 76 KeyI */
+  '/', /* 77 KeyK */
+  0, /* 78 Unused */
+};
+
+static const char kAsciiTable_Orange[] PROGMEM = {
+  '7', /* 11 Key7 */
+  '6', /* 12 Key6 */
+  '5', /* 13 Key5 */
+  '4', /* 14 Key4 */
+  '3', /* 15 Key3 */
+  '2', /* 16 Key2 */
+  '1', /* 17 Key1 */
+  0, /* 18 Unused */
+
+  0, /* 21 KeyU */
+  '-', /* 22 KeyY */
+  '(', /* 23 KeyT */
+  '"', /* 24 KeyR */
+  0, /* 25 KeyE */
+  '~', /* 26 KeyW */
+  '&', /* 27 KeyQ */
+  0, /* 28 Unused */
+
+  0, /* 31 KeyJ */
+  0, /* 32 KeyH */
+  '}', /* 33 KeyG */
+  '{', /* 34 KeyF */
+  0, /* 35 KeyD */
+  0, /* 36 KeyS */
+  0, /* 37 KeyA */
+  0, /* 38 Unused */
+
+  0, /* 41 KeyN */
+  '%', /* 42 KeyB */
+  ']', /* 43 KeyV */
+  '[', /* 44 KeyC */
+  '>', /* 45 KeyX */
+  '<', /* 46 KeyZ */
+  0, /* 47 Unused */
+  0, /* 48 Unused */
+
+  0, /* 51 KeyRight */
+  '\'', /* 52 KeyM */
+  ';', /* 53 KeyPeriod */
+  ' ', /* 54 KeySpace */
+  0, /* 55 KeyLeft */
+  0, /* 56 Unused */
+  0, /* 57 Unused */
+  0, /* 58 Unused */
+
+  0, /* 61 Unused */
+  '^', /* 62 KeyComma */
+  '\n', /* 63 KeyEnter */
+  ')', /* 64 KeyP */
+  '0', /* 65 Key0 */
+  '9', /* 66 Key9 */
+  '8', /* 67 Key8 */
+  0, /* 68 Unused */
+
+  '\b', /* 71 KeyBackspace */
+  0, /* 72 KeyL */
+  0, /* 73 Unused */
+  0, /* 74 Unused */
+  '@', /* 75 KeyO */
+  0, /* 76 KeyI */
+  '\\', /* 77 KeyK */
+  0, /* 78 Unused */
+};
+
+static const char kAsciiTable_People[] PROGMEM = {
+  '7', /* 11 Key7 */
+  '6', /* 12 Key6 */
+  '5', /* 13 Key5 */
+  '4', /* 14 Key4 */
+  '3', /* 15 Key3 */
+  '2', /* 16 Key2 */
+  '1', /* 17 Key1 */
+  0, /* 18 Unused */
+
+  0x15, /* 21 KeyU */
+  0x19, /* 22 KeyY */
+  0x14, /* 23 KeyT */
+  0x12, /* 24 KeyR */
+  0x05, /* 25 KeyE */
+  0x1A, /* 26 KeyW */
+  0x01, /* 27 KeyQ */
+  0, /* 28 Unused */
+
+  0x0A, /* 31 KeyJ */
+  0x08, /* 32 KeyH */
+  0x07, /* 33 KeyG */
+  0x06, /* 34 KeyF */
+  0x04, /* 35 KeyD */
+  0x13, /* 36 KeyS */
+  0x11, /* 37 KeyA */
+  0, /* 38 Unused */
+
+  0x0E, /* 41 KeyN */
+  0x02, /* 42 KeyB */
+  0x16, /* 43 KeyV */
+  0x03, /* 44 KeyC */
+  0x18, /* 45 KeyX */
+  0x17, /* 46 KeyZ */
+  0, /* 47 Unused */
+  0, /* 48 Unused */
+
+  0x1E, /* 51 KeyRight */
+  0x1B, /* 52 KeyM */
+  0x1C, /* 53 KeyPeriod */
+  ' ', /* 54 KeySpace */
+  0x1D, /* 55 KeyLeft */
+  0, /* 56 Unused */
+  0, /* 57 Unused */
+  0, /* 58 Unused */
+
+  0, /* 61 Unused */
+  0x0D, /* 62 KeyComma */
+  '\n', /* 63 KeyEnter */
+  0x10, /* 64 KeyP */
+  '0', /* 65 Key0 */
+  '9', /* 66 Key9 */
+  '8', /* 67 Key8 */
+  0, /* 68 Unused */
+
+  0x1F, /* 71 KeyBackspace */
+  0x0C, /* 72 KeyL */
+  0, /* 73 Unused */
+  0, /* 74 Unused */
+  0x0F, /* 75 KeyO */
+  0x09, /* 76 KeyI */
+  0x0B, /* 77 KeyK */
+  0, /* 78 Unused */
+};
+
+
+#endif // endif keybFR
 char Chatpad::toAscii(keycode_t code) {
   byte index = (((code - 0x11) & 0x70) >> 1) | ((code - 0x11) & 0x7);
   if (index >= sizeof(kAsciiTable)) return 0;
-
+#ifdef keybUS
   if (isShiftDown()) {
     return pgm_read_byte_near(kAsciiTable_Shifted + index);
   } else {
     return pgm_read_byte_near(kAsciiTable + index);
   }
+#endif // keybUS
+#ifdef keybFR
+  if (isShiftDown()) {
+    return pgm_read_byte_near(kAsciiTable_Shifted + index);
+  } else if (isGreenSquareDown()) {
+    return pgm_read_byte_near(kAsciiTable_Green + index);
+  }  else if (isOrangeCircleDown()) {
+    return pgm_read_byte_near(kAsciiTable_Orange + index);
+  }   else if (isPeopleDown()) {
+    return pgm_read_byte_near(kAsciiTable_People + index);
+  } else {
+    return pgm_read_byte_near(kAsciiTable + index);
+  }
+#endif // keybFR
 }

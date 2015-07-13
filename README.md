@@ -25,3 +25,10 @@ Arduino library to support Xbox chatpad this library is based on Cliff L. Biffle
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+07/2015 fdufnews:
+    added support for french keyboard layout
+    added a define to choose which keyboard type to use
+    added tables for OrangeCircle, GreenSquare and People keys. People key generates ctrl codes
+    added synchronize method to resynchronize data stream between Chatpad and Arduino in order to have header code at beginning of buffer.
+    added SILENTLY_RECOVER define in order to not interfere with application when there is loss of sync
